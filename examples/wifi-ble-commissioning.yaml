@@ -1,0 +1,92 @@
+# Matter over Wi-Fi with spec-native BLE commissioning.
+#
+# The device ships WITHOUT Wi-Fi credentials. The Matter controller
+# (Apple Home, Google Home, Home Assistant, SmartThings, ...) finds the
+# device over BLE, sends the Wi-Fi credentials and commissions it.
+# The credentials are then persisted into ESPHome preferences, so the
+# device reconnects on its own after a reboot.
+#
+# Board: ESP32-S3 with PSRAM (strongly recommended for BLE + Wi-Fi + Matter).
+
+substitutions:
+  name: matter-ble-light
+  friendly_name: Matter BLE Light
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+external_components:
+  - source: github://unisec/esphome-matter@main
+    components: [matter]
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# No `networks:` / ssid — credentials come from the Matter commissioner.
+# The fallback AP is kept for recovery.
+wifi:
+  ap:
+    password: !secret ap_password
+
+captive_portal:
+
+network:
+  enable_ipv6: true
+
+# IMPORTANT: do NOT add esp32_ble, esp32_ble_tracker, bluetooth_proxy,
+# esp32_improv or improv_serial — esp-matter needs exclusive BLE access.
+
+matter:
+  vendor_id: 0xFFF1
+  product_id: 0x8001
+  setup_code: "20202021"
+  discriminator: 3841
+  ble_commissioning: true
+  vendor_name: "Unicontrol"
+  product_name: "Matter RGB Light"
+
+output:
+  - platform: ledc
+    pin: GPIO4
+    id: out_r
+  - platform: ledc
+    pin: GPIO5
+    id: out_g
+  - platform: ledc
+    pin: GPIO6
+    id: out_b
+
+light:
+  - platform: rgb
+    name: "RGB Light"                  # RGB → Extended Color Light
+    red: out_r
+    green: out_g
+    blue: out_b
+
+button:
+  - platform: matter
+    name: "Open Matter Pairing Window"
+    action: open_commissioning_window
+  - platform: matter
+    name: "Matter Factory Reset"
+    action: factory_reset
+    entity_category: config

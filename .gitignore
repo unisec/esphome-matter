@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# ESPHome build artifacts
+.esphome/
+**/.esphome/
+.pioenvs/
+.piolibdeps/
+managed_components/
+dependencies.lock
+
+# Secrets
+secrets.yaml
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/

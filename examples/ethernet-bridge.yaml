@@ -1,0 +1,220 @@
+# Matter Bridge over wired Ethernet (W5500 SPI) exposing many entity types.
+#
+# topology: bridge (default) — an Aggregator endpoint is created and every
+# entity shows up as its own accessory in the controller, named after the
+# ESPHome entity name.
+#
+# Board: ESP32-S3 + W5500 + PSRAM. With Ethernet the device is commissioned
+# on-network (no BLE): just scan the QR code / type the manual code shown
+# in the logs.
+
+substitutions:
+  name: matter-bridge
+  friendly_name: Matter Bridge
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+external_components:
+  - source: github://unisec/esphome-matter@main
+    components: [matter]
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+ethernet:
+  type: W5500
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+  miso_pin: GPIO13
+  cs_pin: GPIO10
+  interrupt_pin: GPIO14
+  reset_pin: GPIO9
+
+network:
+  enable_ipv6: true
+
+matter:
+  vendor_id: 0xFFF1
+  product_id: 0x8002
+  setup_code: "20202021"
+  discriminator: 3842
+  topology: bridge
+  vendor_name: "Unicontrol"
+  product_name: "Matter Bridge"
+  node_label: "Panel Bridge"
+
+# ---------------------------------------------------------------- outputs --
+output:
+  - platform: ledc
+    pin: GPIO4
+    id: out_dimmer
+  - platform: ledc
+    pin: GPIO5
+    id: out_cold
+  - platform: ledc
+    pin: GPIO6
+    id: out_warm
+  - platform: ledc
+    pin: GPIO7
+    id: out_fan
+
+# ---------------------------------------------------------------- switch --
+switch:
+  - platform: gpio
+    pin: GPIO15
+    name: "Relay 1"                    # On/Off Plug-in Unit
+  - platform: gpio
+    pin: GPIO16
+    name: "Relay 2"
+  - platform: template
+    id: heater_relay
+    internal: true                     # hidden from Matter
+    optimistic: true
+
+# ----------------------------------------------------------------- light --
+light:
+  - platform: monochromatic
+    name: "Dimmer"                     # Dimmable Light
+    output: out_dimmer
+  - platform: cwww
+    name: "Tunable White"              # Color Temperature Light
+    cold_white: out_cold
+    warm_white: out_warm
+    cold_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2700 K
+
+# ------------------------------------------------------------------- fan --
+fan:
+  - platform: speed
+    name: "Ceiling Fan"                # Fan (FanControl + MultiSpeed)
+    output: out_fan
+    speed_count: 3
+
+# ----------------------------------------------------------------- cover --
+cover:
+  - platform: time_based
+    name: "Blinds"                     # Window Covering (lift %)
+    open_action:
+      - logger.log: "open"
+    open_duration: 20s
+    close_action:
+      - logger.log: "close"
+    close_duration: 20s
+    stop_action:
+      - logger.log: "stop"
+
+# ------------------------------------------------------------------ lock --
+lock:
+  - platform: template
+    name: "Front Door Lock"            # Door Lock
+    optimistic: true
+
+# ----------------------------------------------------------------- valve --
+valve:
+  - platform: template
+    name: "Garden Valve"               # Water Valve
+    optimistic: true
+
+# ---------------------------------------------------------------- select --
+select:
+  - platform: template
+    name: "Scene"                      # Mode Select
+    optimistic: true
+    options: ["Day", "Night", "Away"]
+    initial_option: "Day"
+
+# --------------------------------------------------------------- climate --
+sensor:
+  - platform: template
+    id: room_temp
+    name: "Room Temperature"           # Temperature Sensor
+    unit_of_measurement: "°C"
+    device_class: temperature
+    lambda: return 22.5;
+    update_interval: 60s
+  - platform: template
+    name: "Room Humidity"              # Humidity Sensor
+    unit_of_measurement: "%"
+    device_class: humidity
+    lambda: return 55.0;
+    update_interval: 60s
+  - platform: template
+    name: "Outdoor Light"              # Light Sensor
+    unit_of_measurement: "lx"
+    device_class: illuminance
+    lambda: return 300.0;
+    update_interval: 60s
+  - platform: template
+    name: "Pressure"                   # Pressure Sensor
+    unit_of_measurement: "hPa"
+    device_class: atmospheric_pressure
+    lambda: return 1013.0;
+    update_interval: 60s
+
+climate:
+  - platform: thermostat
+    name: "Thermostat"                 # Thermostat (heat)
+    sensor: room_temp
+    min_heating_off_time: 300s
+    min_heating_run_time: 300s
+    min_idle_time: 30s
+    heat_action:
+      - switch.turn_on: heater_relay
+    idle_action:
+      - switch.turn_off: heater_relay
+    default_preset: Home
+    preset:
+      - name: Home
+        default_target_temperature_low: 21 °C
+
+# --------------------------------------------------------- binary_sensor --
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO17
+      mode: INPUT_PULLUP
+    name: "Window"
+    device_class: window               # Contact Sensor
+  - platform: gpio
+    pin: GPIO18
+    name: "Hallway Motion"
+    device_class: motion               # Occupancy Sensor
+
+# ---------------------------------------------------------------- button --
+button:
+  # Plain ESPHome buttons become Matter Generic Switch (stateless) endpoints,
+  # usable as automation triggers in the controller.
+  - platform: template
+    name: "Doorbell"
+    on_press:
+      - logger.log: "ding dong"
+
+  # Matter management buttons (never exposed to the fabric).
+  - platform: matter
+    name: "Open Matter Pairing Window"
+    action: open_commissioning_window
+    timeout: 10min
+  - platform: matter
+    name: "Matter Factory Reset"
+    action: factory_reset
+    entity_category: config
